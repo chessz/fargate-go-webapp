@@ -44,7 +44,7 @@ manual_creds()
 
 echo -e "\nSpecify AWS credentials here..."
 
-# Task 1: Get AWS Secret and Key from the user
+# Get AWS Secret and Key from the user
 read -p "Enter AWS Access Key ID: " AWS_ACCESS_KEY_ID
 read -s -p "Enter AWS Secret Access Key: " AWS_SECRET_ACCESS_KEY
 echo  # Move to the next line after entering the secret key
@@ -79,7 +79,7 @@ clear
 creds_banner
 show_creds
 
-# Task 2: Run Terraform for ECR creation
+# Run Terraform for ECR creation
 cd ../terraform
 tf_banner
 cat <<EOF > terraform.tfvars
@@ -96,8 +96,8 @@ ecr_rep_uri=$(echo `terraform output ecr_repository_uri | tr -d '"'`)
 # You can now use $output_value in your Bash script
 echo "The value of ecr_repository_uri is: ${ecr_rep_uri}"
 
-# Task 3: Push Docker image to AWS ECR
-# Replace <your_ecr_repository_url> with the actual ECR repository URL
+# Push Docker image to AWS ECR
+# <ecr_repository_url> lookup is from the terraform output
 cd ..
 echo -e "Current Directory: $PWD"
 aws ecr get-login-password --region $AWS_DEFAULT_REGION | docker login --username AWS --password-stdin ${ecr_rep_uri}
@@ -105,7 +105,7 @@ docker build -t pw_ecr_dsop_webapp .
 docker tag pw_ecr_dsop_webapp:latest ${ecr_rep_uri}:latest
 docker push ${ecr_rep_uri}:latest
 
-# Task 4: Run another Terraform command
+# Run another Terraform command
 cd terraform
 tf_banner
 terraform apply -auto-approve
@@ -121,7 +121,7 @@ echo "ALB URL: http://${alb_hostname_url}:8080"
 creds_banner 
 
 # Confirm and export AWS credentials
-# Task 1: Get AWS Secret and Key from ~/.aws/credentials and confirm with user
+# Get AWS Secret and Key from ~/.aws/credentials and confirm with user
 if [[ -f ~/.aws/credentials ]]; then
   aws_creds
 else
