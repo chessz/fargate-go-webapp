@@ -1,0 +1,42 @@
+name: Terraform and Docker Workflow
+
+on:
+  push:
+    branches:
+      - main # You can change this to your desired branch
+
+jobs:
+  terraform:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v2
+
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v1
+        with:
+          terraform_version: 1.x # Replace with the desired Terraform version
+
+      - name: Terraform Init
+        run: cd terraform && terraform init
+
+      - name: Terraform Apply
+        run: terraform apply -target=aws_ecr_repository.pw_ecr_dsop_webapp -auto-approve
+        
+  docker:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v2
+
+      - name: Set up Docker
+        uses: docker/setup-buildx-action@v7 # You can change this to another version
+
+      - name: Build Docker Image
+        run: echo docker build -t pw_ecr_dsop_webapp .
+
+      - name: Push Docker Image
+        run: |
+          echo docker push pw_ecr_dsop_webapp
