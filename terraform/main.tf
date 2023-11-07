@@ -1,17 +1,157 @@
-# Specify AWS region
-provider "aws" {
-  region = "eu-west-1" 
+##############
+### Network
+##############
+
+# Fetch Availability Zones (AZs) in the current region
+data "aws_availability_zones" "available" {}
+
+resource "aws_vpc" "main" {
+  cidr_block = "172.17.0.0/16"
 }
 
-# Create an ECR for a docker container
-resource "aws_ecr_repository" "pw_ecr_dsop_webapp" {
-  name = "pw_ecr_dsop_webapp"  
-  image_tag_mutability = "MUTABLE"
+# Create var.az_count private subnets, each in a different AZ
+resource "aws_subnet" "private" {
+  count             = "${var.az_count}"
+  cidr_block        = "${cidrsubnet(aws_vpc.main.cidr_block, 8, count.index)}"
+  availability_zone = "${data.aws_availability_zones.available.names[count.index]}"
+  vpc_id            = "${aws_vpc.main.id}"
 }
 
-# Create an ECS cluster
-resource "aws_ecs_cluster" "pw_dsop_cluster" {
-  name = "pw-dsop-cluster"
+# Create var.az_count public subnets, each in a different AZ
+resource "aws_subnet" "public" {
+  count                   = "${var.az_count}"
+  cidr_block              = "${cidrsubnet(aws_vpc.main.cidr_block, 8, var.az_count + count.index)}"
+  availability_zone       = "${data.aws_availability_zones.available.names[count.index]}"
+  vpc_id                  = "${aws_vpc.main.id}"
+  map_public_ip_on_launch = true
+}
+
+# Internet Gateway (IGW) for the public subnet
+resource "aws_internet_gateway" "gw" {
+  vpc_id = "${aws_vpc.main.id}"
+}
+
+# Route the public subnet traffic through the IGW
+resource "aws_route" "internet_access" {
+  route_table_id         = "${aws_vpc.main.main_route_table_id}"
+  destination_cidr_block = "0.0.0.0/0"
+  gateway_id             = "${aws_internet_gateway.gw.id}"
+}
+
+# Create a NAT gateway with an EIP for each private subnet to get internet connectivity
+resource "aws_eip" "gw" {
+  count      = "${var.az_count}"
+  depends_on = [aws_internet_gateway.gw]
+}
+
+resource "aws_nat_gateway" "gw" {
+  count         = "${var.az_count}"
+  subnet_id     = "${element(aws_subnet.public.*.id, count.index)}"
+  allocation_id = "${element(aws_eip.gw.*.id, count.index)}"
+}
+
+# Create a new route table for the private subnets
+# And make it route non-local traffic through the NAT gateway to the internet
+resource "aws_route_table" "private" {
+  count  = "${var.az_count}"
+  vpc_id = "${aws_vpc.main.id}"
+
+  route {
+    cidr_block = "0.0.0.0/0"
+    nat_gateway_id = "${element(aws_nat_gateway.gw.*.id, count.index)}"
+  }
+}
+
+# Explicitely associate the newly created route tables to the private subnets (so they don't default to the main route table)
+resource "aws_route_table_association" "private" {
+  count          = "${var.az_count}"
+  subnet_id      = "${element(aws_subnet.private.*.id, count.index)}"
+  route_table_id = "${element(aws_route_table.private.*.id, count.index)}"
+}
+
+################
+### Security
+################
+
+# ALB Security group
+# This is the group you need to edit if you want to restrict access to your application
+resource "aws_security_group" "lb" {
+  name        = "pwdevops-ecs-alb"
+  description = "controls access to the ALB"
+  vpc_id      = "${aws_vpc.main.id}"
+
+  ingress {
+    protocol    = "tcp"
+    from_port   = 8080
+    to_port     = 8080
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  egress {
+    from_port = 0
+    to_port   = 0
+    protocol  = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+}
+
+# Traffic to the ECS Cluster should only come from the ALB
+resource "aws_security_group" "ecs_tasks" {
+  name        = "pwdevops-ecs-tasks"
+  description = "allow inbound access from the ALB only"
+  vpc_id      = "${aws_vpc.main.id}"
+
+  ingress {
+    protocol        = "tcp"
+    from_port       = "${var.app_port}"
+    to_port         = "${var.app_port}"
+    security_groups = ["${aws_security_group.lb.id}"]
+  }
+
+  egress {
+    protocol    = "-1"
+    from_port   = 0
+    to_port     = 0
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+}
+
+##########
+### ALB
+##########
+
+resource "aws_alb" "main" {
+  name            = "pwdevops-go-webapp"
+  subnets         = "${aws_subnet.public.*.id}"
+  security_groups = [aws_security_group.lb.id]
+}
+
+resource "aws_alb_target_group" "app" {
+  name        = "pwdevops-go-webapp"
+  port        = 8080
+  protocol    = "HTTP"
+  vpc_id      = "${aws_vpc.main.id}"
+  target_type = "ip"
+}
+
+# Redirect all traffic from the ALB to the target group
+resource "aws_alb_listener" "front_end" {
+  load_balancer_arn = "${aws_alb.main.id}"
+  port              = "8080"
+  protocol          = "HTTP"
+
+  default_action {
+    target_group_arn = "${aws_alb_target_group.app.id}"
+    type             = "forward"
+  }
+}
+
+#########
+### ECS
+#########
+
+resource "aws_ecs_cluster" "main" {
+  name = "pwdsop-ecs-cluster"
 }
 
 resource "aws_iam_role" "ecs_execution_role" {
@@ -36,191 +176,50 @@ resource "aws_iam_role_policy_attachment" "ecs-task-execution-role-policy-attach
   policy_arn = "arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy"
 }
 
-# Create an ECS task definition
-resource "aws_ecs_task_definition" "pw_dsop_webapp_task_def" {
-  family                   = "pw-dsop-webapp"
+resource "aws_ecs_task_definition" "app" {
+  family                   = "app"
   network_mode             = "awsvpc"
   requires_compatibilities = ["FARGATE"]
+  cpu                      = "${var.fargate_cpu}"
+  memory                   = "${var.fargate_memory}"
   execution_role_arn       = aws_iam_role.ecs_execution_role.arn
 
-  cpu    = "256"  # CPU units - 1 vCPU = 1025 CPU Units
-  memory = "512"  # Memory in MiB 
-
-  container_definitions = jsonencode([
-    {
-      name  = "pw-dsop-webapp"
-      image = "${aws_ecr_repository.pw_ecr_dsop_webapp.repository_url}:latest"
-      portMappings = [
-        {
-          containerPort = 8080
-          hostPort = 8080
-        },
-      ]
-      logConfiguration = {
-        logDriver = "awslogs"
-        options = {
-          "awslogs-group" = "pw-dsop-ecs-logs"
-          "awslogs-region" = "eu-west-1"
-          "awslogs-stream-prefix" = "pw-dsop-webapp"
-        }
+  container_definitions = <<DEFINITION
+[
+  {
+    "cpu": ${var.fargate_cpu},
+    "image": "${aws_ecr_repository.pw_ecr_dsop_webapp.repository_url}:latest",
+    "memory": ${var.fargate_memory},
+    "name": "app",
+    "networkMode": "awsvpc",
+    "portMappings": [
+      {
+        "containerPort": ${var.app_port},
+        "hostPort": ${var.app_port}
       }
-    },
-  ])
+    ]
+  }
+]
+DEFINITION
 }
 
-##################
-# Network Setup
-##################
+resource "aws_ecs_service" "main" {
+  name            = "pwdevops-ecs-service"
+  cluster         = "${aws_ecs_cluster.main.id}"
+  task_definition = "${aws_ecs_task_definition.app.arn}"
+  desired_count   = "${var.app_count}"
+  launch_type     = "FARGATE"
 
-resource "aws_subnet" "pw_dsop_subnet1" {
-  vpc_id                  = aws_vpc.pw_dsop_vpc.id
-  cidr_block              = "10.0.1.0/24"  # CIDR block
-  availability_zone       = "eu-west-1a"   # Availability zone
-  map_public_ip_on_launch = true           # Set to 'true' for public IPs (Optinal)
-}
-
-resource "aws_subnet" "pw_dsop_subnet2" {
-  vpc_id                  = aws_vpc.pw_dsop_vpc.id
-  cidr_block              = "10.0.2.0/24"  # CIDR block
-  availability_zone       = "eu-west-1b"   # Availability zone
-  map_public_ip_on_launch = true           # Set to 'true' for public IPs (Optinal)
-}
-
-resource "aws_vpc" "pw_dsop_vpc" {
-  cidr_block = "10.0.0.0/16"  # CIDR block
-}
-
-# Define an AWS security group with the name "pw_dsop_alb_sg"
-resource "aws_security_group" "pw_dsop_alb_sg" {
-  name_prefix   = "pw_dsop_alb_sg"
-  description   = "PW security group for the Application Load Balancer"
-  vpc_id       = aws_vpc.pw_dsop_vpc.id  # Reference your VPC resource
-
-  # Allow incoming traffic on port 8080
-  ingress {
-    from_port   = 8080
-    to_port     = 8080
-    protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]  # Restrict this to a specific IP range if needed
+  network_configuration {
+    security_groups = ["${aws_security_group.ecs_tasks.id}"]
+    subnets         = "${aws_subnet.private.*.id}"
   }
 
-  egress {
-   protocol         = "-1"
-   from_port        = 0
-   to_port          = 0
-   cidr_blocks      = ["0.0.0.0/0"]
-   ipv6_cidr_blocks = ["::/0"]
+  load_balancer {
+    target_group_arn = "${aws_alb_target_group.app.id}"
+    container_name   = "app"
+    container_port   = "${var.app_port}"
   }
 
-}
-
-# Create internet gateway
-resource "aws_internet_gateway" "pw_dsop_igw" {
-  vpc_id = aws_vpc.pw_dsop_vpc.id
-}
-
-# Configuring a route table
-resource "aws_route_table" "pw_dsop_route_table" {
-  vpc_id = aws_vpc.pw_dsop_vpc.id
-}
-
-# Route table association for subnet1
-resource "aws_route_table_association" "subnet1_association" {
-  subnet_id      = aws_subnet.pw_dsop_subnet1.id  
-  route_table_id = aws_route_table.pw_dsop_route_table.id
-}
-
-# Route table association for subnet2
-resource "aws_route_table_association" "subnet2_association" {
-  subnet_id      = aws_subnet.pw_dsop_subnet2.id  
-  route_table_id = aws_route_table.pw_dsop_route_table.id
-}
-
-# Create an Elastic IP for each NAT gateway
-resource "aws_eip" "nat_eip_subnet1" {
-  instance = null
-}
-
-# Create an Elastic IP for each NAT gateway
-resource "aws_eip" "nat_eip_subnet2" {
-  instance = null
-}
-
-# Create a NAT gateway in each subnet1
-resource "aws_nat_gateway" "nat_gateway_subnet1" {
-  allocation_id = aws_eip.nat_eip_subnet1.id
-  subnet_id     = aws_subnet.pw_dsop_subnet1.id # Use the appropriate subnet
-}
-
-# Create a NAT gateway in each subnet2
-resource "aws_nat_gateway" "nat_gateway_subnet2" {
-  allocation_id = aws_eip.nat_eip_subnet2.id
-  subnet_id     = aws_subnet.pw_dsop_subnet2.id # Use the appropriate subnet
-}
-
-# Update your route table to route traffic through the NAT gateways
-resource "aws_route" "route_to_nat_gateway_subnet1" {
-  route_table_id         = aws_route_table.pw_dsop_route_table.id
-  destination_cidr_block = "0.0.0.0/0"
-  nat_gateway_id         = aws_nat_gateway.nat_gateway_subnet1.id
-}
-
-##################
-# ALB Setup / Expose
-##################
-
-# Create an Application Load Balancer
-resource "aws_lb" "pw_dsop_alb" {
-  name               = "pw-dsop-alb"
-  internal           = false
-  load_balancer_type = "application"
-  enable_deletion_protection = false
-  subnets            = [aws_subnet.pw_dsop_subnet1.id, aws_subnet.pw_dsop_subnet2.id]
-  security_groups    = [aws_security_group.pw_dsop_alb_sg.id]
-}
-
-# Create a target group for the ALB
-resource "aws_lb_target_group" "pw_dsop_target_group" {
-  name        = "pw-dsop-target-group"
-  port        = 8080
-  protocol    = "HTTP"
-  target_type = "ip"
-  vpc_id      = aws_vpc.pw_dsop_vpc.id
-}
-
-# Configure ALB listener
-resource "aws_lb_listener" "my_listener" {
-  load_balancer_arn = aws_lb.pw_dsop_alb.arn
-  port              = 8080
-  protocol          = "HTTP"
-  default_action {
-    type             = "fixed-response"
-    fixed_response {
-      content_type = "text/plain"
-      status_code  = "200"
-      message_body = "OK"
-    }
-  }
-}
-
-##################
-# Display / Output 
-##################
-
-# Show the ECR URI end-point
-output "ecr_repository_uri" {
-  value = aws_ecr_repository.pw_ecr_dsop_webapp.repository_url
-}
-
-# Show the ALB DNS Name
-output "webapp_endpoint" {
-  value = aws_lb.pw_dsop_alb.dns_name
-}
-
-output "nat_gateway_subnet1_eip" {
-  value = aws_eip.nat_eip_subnet1.public_ip
-}
-
-output "nat_gateway_subnet2_eip" {
-  value = aws_eip.nat_eip_subnet2.public_ip
+  depends_on = [aws_alb_listener.front_end,]
 }
