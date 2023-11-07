@@ -20,6 +20,7 @@ jobs:
 
       - name: Terraform Configurations
         run: |
+          cd terraform
           cat <<EOF > terraform.tfvars
           aws_access_key = "${{ secrets.AWS_ACCESS_KEY_ID }}"
           aws_secret_key = "${{ secrets.AWS_SECRET_ACCESS_KEY }}"
@@ -30,7 +31,7 @@ jobs:
         run: cd terraform && terraform init
 
       - name: Terraform Apply
-        run: terraform apply -target=aws_ecr_repository.pw_ecr_dsop_webapp -auto-approve
+        run: cd terraform && terraform apply -target=aws_ecr_repository.pw_ecr_dsop_webapp -auto-approve
         
   docker:
     runs-on: ubuntu-latest
