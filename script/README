@@ -9,7 +9,7 @@
 ### Compilation
 - To compile the Go application, run the following shell script:
   ```shell
-  ./compile.sh
+  ./install.sh
 
 This code adds a "License" section with the MIT license badge and a "Compilation" section that includes a shell script command.
 
