@@ -223,3 +223,62 @@ resource "aws_ecs_service" "main" {
 
   depends_on = [aws_alb_listener.front_end,]
 }
+
+##############
+### CloudWatch
+##############
+
+# Create an SNS topic
+resource "aws_sns_topic" "dsop_sns" {
+  name = "GoWebAppSNS" # Replace with your desired topic name
+}
+
+# Retrieve the ARN of an existing SNS topic
+data "aws_sns_topic" "this" {
+  name = aws_sns_topic.dsop_sns.name
+}
+
+output "sns_topic_arn" {
+  value = aws_sns_topic.dsop_sns.arn
+}
+
+# Create the log group
+resource "aws_cloudwatch_log_group" "dsop-lgrp" {
+  name = "chessz-go-webapp-log" 
+}
+
+# CloudWatch Log Metric Filter
+resource "aws_cloudwatch_log_metric_filter" "http_500_filter" {
+  name           = "http_500_filter"
+  pattern        = "[timestamp, errorCode, message]"
+  log_group_name = aws_cloudwatch_log_group.dsop-lgrp.name
+  metric_transformation {
+    name      = "Http500Errors"
+    namespace = "CustomMetrics"
+    value     = "1"
+  }
+}
+
+# To email
+resource "aws_sns_topic_subscription" "email_subscription" {
+  topic_arn = aws_sns_topic.dsop_sns.arn # Use the ARN of your SNS topic
+  protocol  = "email"
+  endpoint  = "mzul@pm.me" 
+}
+
+# CloudWatch Alarm for HTTP 500 Errors
+resource "aws_cloudwatch_metric_alarm" "http_500_alarm" {
+  alarm_name          = "Http500ErrorsAlarm"
+  comparison_operator = "GreaterThanOrEqualToThreshold"
+  evaluation_periods = 1
+  metric_name         = "Http500Errors"
+  namespace           = "CustomMetrics"
+  period              = 60
+  statistic           = "SampleCount"
+  threshold           = 1
+  alarm_description   = "HTTP 500 Errors Alarm"
+  alarm_actions = [data.aws_sns_topic.this.arn]
+  dimensions = {
+    LogGroupName = "chessz-go-webapp-log" 
+  }
+}
