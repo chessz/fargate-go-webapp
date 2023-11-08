@@ -2,6 +2,8 @@
 
 A set of Terraform templates used for provisioning web application stacks on [AWS ECS Fargate][fargate].
 
+![diagram](docs/aws-ecs-fargate.png)
+
 ## Components
 
 ### base
