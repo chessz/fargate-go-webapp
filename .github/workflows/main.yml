@@ -1,4 +1,4 @@
-name: Terraform, AWS and Docker Workflow
+name: Terraform, AWS, Security Tools and Docker Workflow
 
 on:
   push:
