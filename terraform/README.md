@@ -2,7 +2,7 @@
 
 A set of Terraform templates used for provisioning web application stacks on [AWS ECS Fargate][fargate].
 
-[[https://github.com/chessz/fargate-go-webapp/blob/main/docs/images/aws-ecs-fargate.png|alt=octocat]]
+![high level architecture](../docs/images/aws-ecs-fargate.png)
 
 ## Components
 
