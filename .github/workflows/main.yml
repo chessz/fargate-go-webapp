@@ -57,7 +57,10 @@ jobs:
         run: | 
           # Use the ecr_repo_uri as needed
           echo "ECR Repository URI: ${{ needs.aws.outputs.ecr_repo_uri }}"
-
+          
+      - name: Checkout Code
+        uses: actions/checkout@v2
+        
       - name: Show Current Directory
         run: ls -ltrh
 
@@ -77,6 +80,9 @@ jobs:
       - aws
       - docker
     steps:
+      - name: Checkout Code
+        uses: actions/checkout@v2
+        
       - name: Terraform Configurations
         run: |
           cd terraform
