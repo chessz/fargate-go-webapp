@@ -23,28 +23,30 @@ jobs:
       - name: Trufflehog Scan
         run: |
           # Install Trufflehog (if not already installed)
-          pip install trufflehog
-
+          pip install trufflehog3
           # Run Trufflehog to scan for secrets
-          which trufflehog
-          trufflehog --entropy=False .
+          /home/runner/.local/bin/trufflehog --entropy=False .
+          # disable Git history search, scan current directory and save report as JSON
+          /home/runner/.local/bin/trufflehog3 --no-history --format json --output report.json
+          # render HTML report from JSON
+          /home/runner/.local/bin/trufflehog3 -R report.json --output report.html
+          
+      - name: HTML Preview
+        id: html_preview
+        uses: pavi2410/html-preview-action@v2
+        with:
+          html_file: 'report.html'
 
   gitleaks-scan:
     runs-on: ubuntu-latest
     needs: checkout-code
     steps:
-      - name: Checkout Code
-        uses: actions/checkout@v2
-
-      - name: Gitleaks Scan
-        run: |
-          # Install Gitleaks (if not already installed)
-          curl -sSfL https://raw.githubusercontent.com/zricethezav/gitleaks/master/install.sh | sh -s
-
-          # Run Gitleaks to scan for sensitive data in the repository
-          which gitleaks
-          ls -ltrh
-          gitleaks -v --path .
+      - uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+      - uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
  
   build-container:
     runs-on: ubuntu-latest
