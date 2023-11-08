@@ -69,9 +69,13 @@ jobs:
 
       - name: Tag docker image
         run: docker tag pw_ecr_dsop_webapp:latest ${{ env.ECR_REPO_URI }}/pw_ecr_dsop_webapp:latest
+        env:
+          ECR_REPO_URI: ${{ env.ECR_REPO_URI }}
 
       - name: Push docker image
         run: docker push ${{ env.ECR_REPO_URI }}/pw_ecr_dsop_webapp:latest
+        env:
+          ECR_REPO_URI: ${{ env.ECR_REPO_URI }}
 
   terraform:
     runs-on: ubuntu-latest
