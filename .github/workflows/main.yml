@@ -25,7 +25,7 @@ jobs:
           # Install Trufflehog (if not already installed)
           pip install trufflehog3
           # Run Trufflehog to scan for secrets
-          trufflehog3 --entropy=False .
+          trufflehog3 .
           # disable Git history search, scan current directory and save report as JSON
           trufflehog3 --no-history --format json --output report.json
           # render HTML report from JSON
