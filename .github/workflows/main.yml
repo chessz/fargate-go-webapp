@@ -25,11 +25,11 @@ jobs:
           # Install Trufflehog (if not already installed)
           pip install trufflehog3
           # Run Trufflehog to scan for secrets
-          /home/runner/.local/bin/trufflehog --entropy=False .
+          trufflehog3 --entropy=False .
           # disable Git history search, scan current directory and save report as JSON
-          /home/runner/.local/bin/trufflehog3 --no-history --format json --output report.json
+          trufflehog3 --no-history --format json --output report.json
           # render HTML report from JSON
-          /home/runner/.local/bin/trufflehog3 -R report.json --output report.html
+          trufflehog3 -R report.json --output report.html
           
       - name: HTML Preview
         id: html_preview
@@ -114,4 +114,4 @@ jobs:
         run: cd terraform && terraform init
 
       - name: Terraform Apply
-        run: cd terraform && terraform apply -auto-approve
+        run: cd terraform && terraform apply target -auto-approve
