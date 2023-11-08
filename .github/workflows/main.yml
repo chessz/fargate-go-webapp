@@ -27,11 +27,11 @@ jobs:
           # Which trufflehog3
           which trufflehog3
           # Run Trufflehog to scan for secrets
-          trufflehog3 .
+          /home/runner/.local/bin/trufflehog3 .
           # disable Git history search, scan current directory and save report as JSON
-          trufflehog3 --no-history --format json --output report.json
+          /home/runner/.local/bin/trufflehog3 --no-history --format json --output report.json
           # render HTML report from JSON
-          trufflehog3 -R report.json --output report.html
+          /home/runner/.local/bin/trufflehog3 -R report.json --output report.html
           
       - name: HTML Preview
         id: html_preview
